@@ -1,0 +1,27 @@
+<section class="space-y-4">
+  <div>
+    <h1 class="text-[28px] font-extrabold tracking-tight">Bantuan</h1>
+    <p class="text-sm text-inksoft">Teman bantu cucianmu, 24 jam.</p>
+  </div>
+
+  <div class="bg-aqua rounded-3xl px-5 py-4 shadow-sm">
+    <div class="font-bold text-sm text-ink">Asisten SUKI Laundry · AI</div>
+    <div class="text-xs text-ink/80 mt-0.5">Siap membantu, kapan pun kamu butuh.</div>
+  </div>
+
+  <div id="chatBox" class="space-y-3 min-h-[260px]"></div>
+
+  <div class="grid grid-cols-2 gap-2.5 pt-1">
+    <button onclick="PelangganApp.sendChat('Cek status cucian')" class="bg-white hover:bg-aqua/40 py-2.5 px-3 rounded-2xl text-xs font-semibold text-ink shadow-sm transition cursor-pointer">Cek status cucian</button>
+    <button onclick="PelangganApp.sendChat('Daftar harga')" class="bg-white hover:bg-aqua/40 py-2.5 px-3 rounded-2xl text-xs font-semibold text-ink shadow-sm transition cursor-pointer">Daftar harga</button>
+    <button onclick="PelangganApp.sendChat('Jam buka')" class="bg-white hover:bg-aqua/40 py-2.5 px-3 rounded-2xl text-xs font-semibold text-ink shadow-sm transition cursor-pointer">Jam buka</button>
+    <button onclick="PelangganApp.sendChat('Estimasi selesai')" class="bg-white hover:bg-aqua/40 py-2.5 px-3 rounded-2xl text-xs font-semibold text-ink shadow-sm transition cursor-pointer">Estimasi selesai</button>
+  </div>
+
+  <form id="chatForm" class="bg-white rounded-full p-1.5 pl-4 flex items-center gap-2 shadow-sm">
+    <input id="chatInput" type="text" placeholder="Tulis pesanmu..." class="flex-1 text-sm bg-transparent focus:outline-none text-ink placeholder:text-inksoft" />
+    <button type="submit" class="w-10 h-10 rounded-full bg-tealbrand hover:bg-tealdark text-white flex items-center justify-center shrink-0 cursor-pointer">
+      <i data-lucide="send" class="w-4 h-4"></i>
+    </button>
+  </form>
+</section>
