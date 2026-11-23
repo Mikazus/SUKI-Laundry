@@ -9,6 +9,12 @@
     <button id="segRiwayat" onclick="PelangganApp.setNotaMode('riwayat')" class="py-2.5 rounded-xl text-ink font-semibold text-sm transition cursor-pointer">Riwayat</button>
   </div>
 
+  <!-- Tombol Buka Kamera Scan QR Owner -->
+  <button onclick="PelangganApp.openScanner()" class="w-full py-3.5 px-4 rounded-2xl bg-tealbrand hover:bg-tealdark text-white font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition cursor-pointer">
+    <i data-lucide="scan-line" class="w-5 h-5"></i>
+    <span>Scan QR Pengambilan (Buka Kamera)</span>
+  </button>
+
   <div id="notaActiveContainer"></div>
 
   <div>

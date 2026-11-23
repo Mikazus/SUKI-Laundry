@@ -5,7 +5,6 @@
   </div>
 
   <div class="grid grid-cols-3 gap-6 items-start">
-    <!-- Form -->
     <div class="col-span-2 bg-white rounded-3xl p-6 shadow-sm space-y-5">
       <div>
         <h2 class="text-base font-bold text-ink">Informasi pelanggan</h2>
@@ -42,22 +41,48 @@
         </div>
       </div>
 
+      <!-- Paket Layanan -->
       <div>
         <label class="block text-xs font-bold text-ink mb-2">Paket layanan *</label>
         <div class="grid grid-cols-2 gap-4">
           <button type="button" id="pkgReguler" onclick="selectPkg('Reguler')"
             class="p-4 rounded-2xl border border-borderline text-left transition cursor-pointer">
             <div class="font-bold text-sm text-ink flex items-center gap-2">
-              <span class="w-3.5 h-3.5 rounded-full border-2 border-ink inline-block"></span> Reguler
+              <span id="dotReguler" class="w-4 h-4 rounded-full border-2 border-ink inline-block shrink-0 transition-all"></span>
+              <span>Reguler</span>
             </div>
             <div class="text-xs text-inksoft mt-1">2 hari · Rp7.000/kg</div>
           </button>
           <button type="button" id="pkgEkspres" onclick="selectPkg('Ekspres')"
             class="p-4 rounded-2xl bg-aqua border border-aqua text-left transition cursor-pointer">
             <div class="font-bold text-sm text-ink flex items-center gap-2">
-              <span class="w-3.5 h-3.5 rounded-full border-4 border-ink bg-white inline-block"></span> Ekspres
+              <span id="dotEkspres" class="w-4 h-4 rounded-full border-[5px] border-ink bg-white inline-block shrink-0 transition-all"></span>
+              <span>Ekspres</span>
             </div>
             <div class="text-xs text-ink/80 mt-1">8 jam · Rp14.000/kg</div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Metode Pembayaran (QRIS / Tunai) -->
+      <div>
+        <label class="block text-xs font-bold text-ink mb-2">Metode pembayaran *</label>
+        <div class="grid grid-cols-2 gap-4">
+          <button type="button" id="payQRIS" onclick="selectPayment('QRIS')"
+            class="p-4 rounded-2xl bg-aqua border border-aqua text-left transition cursor-pointer">
+            <div class="font-bold text-sm text-ink flex items-center gap-2">
+              <span id="dotQRIS" class="w-4 h-4 rounded-full border-[5px] border-ink bg-white inline-block shrink-0 transition-all"></span>
+              <span>QRIS</span>
+            </div>
+            <div class="text-xs text-ink/80 mt-1">Nontunai · Masuk rekap nontunai</div>
+          </button>
+          <button type="button" id="payTunai" onclick="selectPayment('Tunai')"
+            class="p-4 rounded-2xl border border-borderline text-left transition cursor-pointer">
+            <div class="font-bold text-sm text-ink flex items-center gap-2">
+              <span id="dotTunai" class="w-4 h-4 rounded-full border-2 border-ink inline-block shrink-0 transition-all"></span>
+              <span>Tunai</span>
+            </div>
+            <div class="text-xs text-inksoft mt-1">Cash kasir · Masuk rekap tunai</div>
           </button>
         </div>
       </div>
@@ -73,19 +98,17 @@
       </div>
     </div>
 
-    <!-- Summary -->
     <div class="space-y-3">
       <div class="bg-white rounded-3xl p-6 shadow-sm space-y-4">
         <div class="flex items-center justify-between">
           <h2 class="text-base font-bold text-ink">Ringkasan pesanan</h2>
           <span class="px-3 py-1 rounded-full bg-aqua text-ink text-[11px] font-bold">Otomatis</span>
         </div>
-        <div class="bg-mutedbox/70 rounded-xl px-3.5 py-2.5 text-xs font-bold text-ink">
-          #SK-BARU · Hari ini
-        </div>
+        <div id="sumOrderHeader" class="bg-mutedbox/70 rounded-xl px-3.5 py-2.5 text-xs font-bold text-ink"></div>
         <div class="space-y-2 text-xs">
           <div class="flex justify-between"><span id="sumService" class="text-inksoft">Cuci + setrika</span><span id="sumWeight" class="font-bold">3,0 kg</span></div>
           <div class="flex justify-between"><span id="sumPkg" class="text-inksoft">Paket Ekspres</span><span id="sumRate" class="font-bold">Rp14.000/kg</span></div>
+          <div class="flex justify-between"><span class="text-inksoft">Pembayaran</span><span id="sumPay" class="font-bold">QRIS</span></div>
           <div class="flex justify-between"><span class="text-inksoft">Subtotal</span><span id="sumSub" class="font-bold">Rp42.000</span></div>
         </div>
         <div class="bg-aqua rounded-2xl p-4 flex items-center justify-between">
@@ -94,7 +117,7 @@
         </div>
         <div>
           <div class="text-[10px] font-bold uppercase text-inksoft">Estimasi Selesai</div>
-          <div id="sumEst" class="text-base font-extrabold text-ink mt-0.5">Hari ini · 8 jam</div>
+          <div id="sumEst" class="text-base font-extrabold text-ink mt-0.5"></div>
         </div>
       </div>
 

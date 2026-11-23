@@ -7,12 +7,13 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/shared/tailwind-config.js"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://unpkg.com/html5-qrcode"></script>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body class="bg-[#1F2D30] sm:py-6 flex justify-center min-h-screen font-sans text-ink">
 
   <div class="w-full max-w-[430px] bg-canvas min-h-screen sm:min-h-[844px] sm:rounded-[36px] sm:shadow-2xl flex flex-col relative overflow-hidden">
-    <!-- Konten halaman aktif dimuat ke sini -->
+    <!-- Dynamic Page Section Outlet -->
     <main id="app-view" class="flex-1 overflow-y-auto px-5 pt-7 pb-28"></main>
 
     <!-- Bottom Navigation -->
@@ -38,6 +39,38 @@
         <span class="nav-label text-[11px]">Profil</span>
       </a>
     </nav>
+
+    <!-- MODAL SCANNER KAMERA QR -->
+    <div id="scanModal" class="hidden absolute inset-0 z-50 bg-ink/80 backdrop-blur-xs flex items-center justify-center p-4">
+      <div class="bg-white rounded-3xl w-full p-5 shadow-xl space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-base font-extrabold text-ink">Scan QR Pengambilan</h3>
+            <p class="text-[11px] text-inksoft">Arahkan kamera ke QR di layar kasir.</p>
+          </div>
+          <button onclick="PelangganApp.closeScanner()" class="p-1.5 rounded-xl hover:bg-canvas/60 text-inksoft cursor-pointer">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div id="qr-reader" class="w-full rounded-2xl overflow-hidden bg-ink/10 min-h-[240px]"></div>
+
+        <div id="scanFeedback" class="hidden text-xs font-semibold px-3.5 py-2.5 rounded-xl"></div>
+
+        <!-- Fallback Input Kode Manual -->
+        <div class="pt-2 border-t border-mutedbox">
+          <label class="block text-[11px] font-bold text-inksoft mb-1.5">Atau masukkan kode verifikasi kasir:</label>
+          <div class="flex gap-2">
+            <input id="manualQRInput" type="text" placeholder="Contoh: PK-A3F91C"
+              onkeydown="if(event.key==='Enter') PelangganApp.submitManualQR()"
+              class="flex-1 px-3 py-2 rounded-xl border border-borderline text-xs text-ink focus:outline-none focus:border-tealbrand" />
+            <button onclick="PelangganApp.submitManualQR()" class="px-4 py-2 rounded-xl bg-tealbrand hover:bg-tealdark text-white text-xs font-bold cursor-pointer">
+              Verifikasi
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="/shared/api.js"></script>

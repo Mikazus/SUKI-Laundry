@@ -1,9 +1,13 @@
 package handler
 
 import (
+	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"os"
@@ -47,12 +51,35 @@ type Order struct {
 	CreatedAt     string  `json:"created_at"`
 	EstFinish     string  `json:"est_finish"`
 	StepTime      string  `json:"step_time"`
+	PickupToken   string  `json:"pickup_token,omitempty"`
 }
 
 var (
-	dbMu sync.Mutex
-	db   *sql.DB
+	dbMu   sync.Mutex
+	db     *sql.DB
+	locWIB = time.FixedZone("WIB", 7*3600)
 )
+
+var bulanFull = []string{"", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"}
+var bulanShort = []string{"", "Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"}
+
+func nowWIB() time.Time {
+	return time.Now().In(locWIB)
+}
+
+func fmtFullWIB(t time.Time) string {
+	return fmt.Sprintf("%02d %s %d · %02d.%02d WIB", t.Day(), bulanFull[t.Month()], t.Year(), t.Hour(), t.Minute())
+}
+
+func fmtShortWIB(t time.Time) string {
+	return fmt.Sprintf("%02d %s, %02d.%02d WIB", t.Day(), bulanShort[t.Month()], t.Hour(), t.Minute())
+}
+
+func randomToken(nBytes int) string {
+	b := make([]byte, nBytes)
+	_, _ = rand.Read(b)
+	return strings.ToUpper(hex.EncodeToString(b))
+}
 
 func getDB() (*sql.DB, error) {
 	dbMu.Lock()
@@ -62,10 +89,22 @@ func getDB() (*sql.DB, error) {
 		return db, nil
 	}
 
-	dsn := os.Getenv("DATABASE_URL")
+	dsn := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if dsn == "" {
 		return nil, fmt.Errorf("environment variable DATABASE_URL belum diatur")
 	}
+
+	// Wajib untuk kompatibilitas PgBouncer (-pooler) di Neon
+	if !strings.Contains(dsn, "default_query_exec_mode") {
+		sep := "?"
+		if strings.Contains(dsn, "?") {
+			sep = "&"
+		}
+		dsn += sep + "default_query_exec_mode=simple_protocol"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	conn, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -75,70 +114,77 @@ func getDB() (*sql.DB, error) {
 	conn.SetMaxIdleConns(2)
 	conn.SetConnMaxLifetime(5 * time.Minute)
 
-	if err := conn.Ping(); err != nil {
-		return nil, err
-	}
-	if err := initSchemaAndSeed(conn); err != nil {
-		return nil, err
+	log.Println("[SUKI] Menghubungkan ke Neon PostgreSQL...")
+	if err := conn.PingContext(ctx); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("gagal ping Neon (cek jaringan/DATABASE_URL): %w", err)
 	}
 
+	if err := initSchemaAndSeed(ctx, conn); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("gagal migrasi tabel: %w", err)
+	}
+
+	log.Println("[SUKI] Database Neon siap!")
 	db = conn
 	return db, nil
 }
 
-func initSchemaAndSeed(conn *sql.DB) error {
-	schema := `
-	CREATE TABLE IF NOT EXISTS users (
-		id TEXT PRIMARY KEY,
-		name TEXT NOT NULL,
-		email TEXT UNIQUE NOT NULL,
-		password TEXT NOT NULL,
-		role TEXT NOT NULL,
-		phone TEXT NOT NULL DEFAULT '',
-		subtitle TEXT NOT NULL DEFAULT '',
-		notif_end BOOLEAN NOT NULL DEFAULT TRUE,
-		notif_chg BOOLEAN NOT NULL DEFAULT TRUE
-	);
+func initSchemaAndSeed(ctx context.Context, conn *sql.DB) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS users (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			email TEXT UNIQUE NOT NULL,
+			password TEXT NOT NULL,
+			role TEXT NOT NULL,
+			phone TEXT NOT NULL DEFAULT '',
+			subtitle TEXT NOT NULL DEFAULT '',
+			notif_end BOOLEAN NOT NULL DEFAULT TRUE,
+			notif_chg BOOLEAN NOT NULL DEFAULT TRUE
+		)`,
+		`CREATE SEQUENCE IF NOT EXISTS order_seq START 1049`,
+		`CREATE TABLE IF NOT EXISTS orders (
+			seq_id SERIAL,
+			id TEXT PRIMARY KEY,
+			customer_name TEXT NOT NULL,
+			customer_email TEXT NOT NULL DEFAULT '',
+			phone TEXT NOT NULL,
+			service_type TEXT NOT NULL,
+			package TEXT NOT NULL,
+			weight DOUBLE PRECISION NOT NULL,
+			price_per_kg INT NOT NULL,
+			perfume_fee INT NOT NULL DEFAULT 0,
+			discount INT NOT NULL DEFAULT 0,
+			total INT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'Antre',
+			payment_status TEXT NOT NULL DEFAULT 'Lunas',
+			payment_method TEXT NOT NULL DEFAULT 'QRIS',
+			rack_location TEXT NOT NULL DEFAULT 'A-01',
+			bags_count INT NOT NULL DEFAULT 1,
+			notes TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			est_finish TEXT NOT NULL,
+			step_time TEXT NOT NULL,
+			pickup_token TEXT NOT NULL DEFAULT ''
+		)`,
+		`ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_token TEXT NOT NULL DEFAULT ''`,
+	}
 
-	CREATE SEQUENCE IF NOT EXISTS order_seq START 1049;
-
-	CREATE TABLE IF NOT EXISTS orders (
-		seq_id SERIAL,
-		id TEXT PRIMARY KEY,
-		customer_name TEXT NOT NULL,
-		customer_email TEXT NOT NULL DEFAULT '',
-		phone TEXT NOT NULL,
-		service_type TEXT NOT NULL,
-		package TEXT NOT NULL,
-		weight DOUBLE PRECISION NOT NULL,
-		price_per_kg INT NOT NULL,
-		perfume_fee INT NOT NULL DEFAULT 0,
-		discount INT NOT NULL DEFAULT 0,
-		total INT NOT NULL,
-		status TEXT NOT NULL DEFAULT 'Antre',
-		payment_status TEXT NOT NULL DEFAULT 'Lunas',
-		payment_method TEXT NOT NULL DEFAULT 'QRIS',
-		rack_location TEXT NOT NULL DEFAULT 'A-01',
-		bags_count INT NOT NULL DEFAULT 1,
-		notes TEXT NOT NULL DEFAULT '',
-		created_at TEXT NOT NULL,
-		est_finish TEXT NOT NULL,
-		step_time TEXT NOT NULL
-	);`
-
-	if _, err := conn.Exec(schema); err != nil {
-		return err
+	for _, q := range stmts {
+		if _, err := conn.ExecContext(ctx, q); err != nil {
+			return err
+		}
 	}
 
 	var count int
-	if err := conn.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
 		return err
 	}
 	if count > 0 {
 		return nil
 	}
 
-	// Seed akun demo (Pelanggan & Owner)
 	seedUsers := []User{
 		{
 			ID: "USR-01", Name: "Richard Pratama", Email: "richard@student.ub.ac.id",
@@ -152,7 +198,8 @@ func initSchemaAndSeed(conn *sql.DB) error {
 		},
 	}
 	for _, u := range seedUsers {
-		_, err := conn.Exec(
+		_, err := conn.ExecContext(
+			ctx,
 			`INSERT INTO users (id, name, email, password, role, phone, subtitle, notif_end, notif_chg)
 			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`,
 			u.ID, u.Name, u.Email, u.Password, u.Role, u.Phone, u.Subtitle, u.NotifEnd, u.NotifChg,
@@ -162,7 +209,7 @@ func initSchemaAndSeed(conn *sql.DB) error {
 		}
 	}
 
-	// Seed pesanan awal (di-insert terbalik agar #SK-1048 punya seq_id paling atas)
+	t := nowWIB()
 	seedOrders := []Order{
 		{
 			ID: "#SK-1048", CustomerName: "Richard Pratama", CustomerEmail: "richard@student.ub.ac.id",
@@ -170,57 +217,21 @@ func initSchemaAndSeed(conn *sql.DB) error {
 			Weight: 4, PricePerKg: 7000, PerfumeFee: 2000, Discount: 2000, Total: 28000,
 			Status: "Disetrika", PaymentStatus: "Lunas", PaymentMethod: "QRIS",
 			RackLocation: "B-01", BagsCount: 1, Notes: "Pisahkan kemeja putih.",
-			CreatedAt: "16 November 2026 · 08.15 WIB", EstFinish: "Hari ini, 18.00 WIB", StepTime: "16 Nov, 14.10 WIB",
+			CreatedAt: fmtFullWIB(t.Add(-4 * time.Hour)), EstFinish: "Hari ini, 18.00 WIB", StepTime: fmtShortWIB(t.Add(-1 * time.Hour)),
 		},
 		{
 			ID: "#SK-1041", CustomerName: "Richard Pratama", CustomerEmail: "richard@student.ub.ac.id",
 			Phone: "0812 3456 7890", ServiceType: "Cuci + setrika", Package: "Reguler",
 			Weight: 3, PricePerKg: 7000, Total: 21000, Status: "Siap Diambil",
 			PaymentStatus: "Lunas", PaymentMethod: "QRIS", RackLocation: "A-04", BagsCount: 1,
-			CreatedAt: "14 November 2026 · 09.30 WIB", EstFinish: "16 Nov · 10.00 WIB", StepTime: "16 Nov, 09.45 WIB",
+			CreatedAt: fmtFullWIB(t.Add(-48 * time.Hour)), EstFinish: "Siap diambil hari ini", StepTime: fmtShortWIB(t.Add(-2 * time.Hour)),
 		},
 		{
 			ID: "#SK-1027", CustomerName: "Richard Pratama", CustomerEmail: "richard@student.ub.ac.id",
 			Phone: "0812 3456 7890", ServiceType: "Cuci + setrika", Package: "Ekspres",
-			Weight: 2, PricePerKg: 12000, Total: 24000, Status: "Selesai",
+			Weight: 2, PricePerKg: 14000, Total: 28000, Status: "Selesai",
 			PaymentStatus: "Lunas", PaymentMethod: "Tunai", RackLocation: "A-01", BagsCount: 1,
-			CreatedAt: "8 November 2026 · 10.00 WIB", EstFinish: "8 Nov · 18.00 WIB", StepTime: "8 Nov, 17.30 WIB",
-		},
-		{
-			ID: "#SK-1611-024", CustomerName: "Nadia Putri", CustomerEmail: "nadia@mail.com",
-			Phone: "0812 3450 9988", ServiceType: "Cuci + setrika", Package: "Ekspres",
-			Weight: 3, PricePerKg: 14000, Total: 42000, Status: "Antre",
-			PaymentStatus: "Lunas", PaymentMethod: "QRIS", RackLocation: "C-01", BagsCount: 1,
-			Notes: "Pisahkan pakaian putih. Jangan gunakan pewangi.",
-			CreatedAt: "16 November 2026 · 09.00 WIB", EstFinish: "Hari ini, 17.00", StepTime: "16 Nov, 09.00 WIB",
-		},
-		{
-			ID: "#SK-1611-022", CustomerName: "Rina Wulandari", CustomerEmail: "rina@mail.com",
-			Phone: "0813 9988 1122", ServiceType: "Cuci + setrika", Package: "Ekspres",
-			Weight: 2, PricePerKg: 14000, Total: 28000, Status: "Antre",
-			PaymentStatus: "Lunas", PaymentMethod: "Transfer", RackLocation: "C-02", BagsCount: 1,
-			CreatedAt: "16 November 2026 · 10.00 WIB", EstFinish: "Hari ini, 18.00", StepTime: "16 Nov, 10.00 WIB",
-		},
-		{
-			ID: "#SK-1611-020", CustomerName: "Dewi Lestari", CustomerEmail: "dewi@mail.com",
-			Phone: "0812 7766 5544", ServiceType: "Cuci + setrika", Package: "Ekspres",
-			Weight: 4, PricePerKg: 14000, Total: 56000, Status: "Dicuci",
-			PaymentStatus: "Lunas", PaymentMethod: "Tunai", RackLocation: "B-02", BagsCount: 2,
-			CreatedAt: "16 November 2026 · 07.30 WIB", EstFinish: "Hari ini, 15.00", StepTime: "16 Nov, 09.15 WIB",
-		},
-		{
-			ID: "#SK-1611-023", CustomerName: "Budi Santoso", CustomerEmail: "budi@mail.com",
-			Phone: "0857 1122 3344", ServiceType: "Cuci + setrika", Package: "Reguler",
-			Weight: 5, PricePerKg: 7000, Total: 35000, Status: "Dicuci",
-			PaymentStatus: "Lunas", PaymentMethod: "QRIS", RackLocation: "B-04", BagsCount: 2,
-			CreatedAt: "16 November 2026 · 08.45 WIB", EstFinish: "18 Nov, 09.00", StepTime: "16 Nov, 10.20 WIB",
-		},
-		{
-			ID: "#SK-1611-019", CustomerName: "Andi Pratama", CustomerEmail: "andi@mail.com",
-			Phone: "0821 4455 6677", ServiceType: "Cuci + setrika", Package: "Ekspres",
-			Weight: 3, PricePerKg: 14000, Total: 42000, Status: "Disetrika",
-			PaymentStatus: "Lunas", PaymentMethod: "Transfer", RackLocation: "A-05", BagsCount: 1,
-			CreatedAt: "16 November 2026 · 08.00 WIB", EstFinish: "Hari ini, 13.00", StepTime: "16 Nov, 11.40 WIB",
+			CreatedAt: fmtFullWIB(t.Add(-72 * time.Hour)), EstFinish: "Selesai", StepTime: fmtShortWIB(t.Add(-64 * time.Hour)),
 		},
 		{
 			ID: "#SK-1411-018", CustomerName: "Siti Rahma", CustomerEmail: "siti@mail.com",
@@ -228,26 +239,20 @@ func initSchemaAndSeed(conn *sql.DB) error {
 			Weight: 6, PricePerKg: 7000, Total: 42000, Status: "Siap Diambil",
 			PaymentStatus: "Lunas", PaymentMethod: "Tunai", RackLocation: "B-03", BagsCount: 2,
 			Notes: "Disimpan dalam 2 kantong terpisah.",
-			CreatedAt: "14 November 2026 · 10.00 WIB", EstFinish: "16 Nov, 10.00", StepTime: "16 Nov, 09.30 WIB",
-		},
-		{
-			ID: "#SK-1411-016", CustomerName: "Agus Wijaya", CustomerEmail: "agus@mail.com",
-			Phone: "0819 3322 1100", ServiceType: "Cuci + setrika", Package: "Reguler",
-			Weight: 3, PricePerKg: 7000, Total: 21000, Status: "Siap Diambil",
-			PaymentStatus: "Belum lunas", PaymentMethod: "Tunai", RackLocation: "A-02", BagsCount: 1,
-			CreatedAt: "14 November 2026 · 11.00 WIB", EstFinish: "16 Nov, 11.00", StepTime: "16 Nov, 10.15 WIB",
+			CreatedAt: fmtFullWIB(t.Add(-24 * time.Hour)), EstFinish: "Siap diambil", StepTime: fmtShortWIB(t.Add(-1 * time.Hour)),
 		},
 	}
 
 	for i := len(seedOrders) - 1; i >= 0; i-- {
 		o := seedOrders[i]
-		_, err := conn.Exec(
+		_, err := conn.ExecContext(
+			ctx,
 			`INSERT INTO orders (
 				id, customer_name, customer_email, phone, service_type, package,
 				weight, price_per_kg, perfume_fee, discount, total, status,
 				payment_status, payment_method, rack_location, bags_count,
-				notes, created_at, est_finish, step_time
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+				notes, created_at, est_finish, step_time, pickup_token
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,'')
 			ON CONFLICT DO NOTHING`,
 			o.ID, o.CustomerName, o.CustomerEmail, o.Phone, o.ServiceType, o.Package,
 			o.Weight, o.PricePerKg, o.PerfumeFee, o.Discount, o.Total, o.Status,
@@ -268,30 +273,43 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 }
 
 func Handler(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimSuffix(r.URL.Path, "/")
+	if qPath := strings.TrimPrefix(r.URL.Query().Get("path"), "/"); qPath != "" {
+		path = "/api/" + strings.TrimSuffix(qPath, "/")
+	}
+	log.Printf("[SUKI] %s %s", r.Method, path)
+
 	conn, err := getDB()
 	if err != nil {
+		log.Printf("[SUKI] DB Error: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Koneksi database gagal: " + err.Error()})
 		return
 	}
 
-	path := strings.TrimSuffix(r.URL.Path, "/")
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
 	switch path {
 	case "/api/login":
-		handleLogin(w, r, conn)
+		handleLogin(ctx, w, r, conn)
 	case "/api/orders":
-		handleOrders(w, r, conn)
+		handleOrders(ctx, w, r, conn)
 	case "/api/orders/status":
-		handleOrderStatus(w, r, conn)
+		handleOrderStatus(ctx, w, r, conn)
+	case "/api/orders/pickup-qr":
+		handleGeneratePickupQR(ctx, w, r, conn)
+	case "/api/orders/verify-qr":
+		handleVerifyPickupQR(ctx, w, r, conn)
 	case "/api/profile":
-		handleProfile(w, r, conn)
+		handleProfile(ctx, w, r, conn)
 	case "/api/chat":
-		handleChat(w, r, conn)
+		handleChat(ctx, w, r, conn)
 	default:
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Endpoint tidak ditemukan"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Endpoint tidak ditemukan: " + path})
 	}
 }
 
-func handleLogin(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
+func handleLogin(ctx context.Context, w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -309,7 +327,8 @@ func handleLogin(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 	cleanPhone := strings.ReplaceAll(id, " ", "")
 
 	var u User
-	err := conn.QueryRow(
+	err := conn.QueryRowContext(
+		ctx,
 		`SELECT id, name, email, password, role, phone, subtitle, notif_end, notif_chg
 		 FROM users
 		 WHERE LOWER(email) = $1 OR REPLACE(phone, ' ', '') = $2
@@ -333,7 +352,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 	})
 }
 
-func handleOrders(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
+func handleOrders(ctx context.Context, w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 	switch r.Method {
 	case http.MethodGet:
 		emailFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("email")))
@@ -344,12 +363,12 @@ func handleOrders(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 		baseQuery := `SELECT id, customer_name, customer_email, phone, service_type, package,
 		                     weight, price_per_kg, perfume_fee, discount, total, status,
 		                     payment_status, payment_method, rack_location, bags_count,
-		                     notes, created_at, est_finish, step_time
+		                     notes, created_at, est_finish, step_time, pickup_token
 		              FROM orders`
 		if emailFilter != "" {
-			rows, err = conn.Query(baseQuery+` WHERE LOWER(customer_email) = $1 ORDER BY seq_id DESC`, emailFilter)
+			rows, err = conn.QueryContext(ctx, baseQuery+` WHERE LOWER(customer_email) = $1 ORDER BY seq_id DESC`, emailFilter)
 		} else {
-			rows, err = conn.Query(baseQuery + ` ORDER BY seq_id DESC`)
+			rows, err = conn.QueryContext(ctx, baseQuery+` ORDER BY seq_id DESC`)
 		}
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -364,7 +383,7 @@ func handleOrders(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 				&o.ID, &o.CustomerName, &o.CustomerEmail, &o.Phone, &o.ServiceType, &o.Package,
 				&o.Weight, &o.PricePerKg, &o.PerfumeFee, &o.Discount, &o.Total, &o.Status,
 				&o.PaymentStatus, &o.PaymentMethod, &o.RackLocation, &o.BagsCount,
-				&o.Notes, &o.CreatedAt, &o.EstFinish, &o.StepTime,
+				&o.Notes, &o.CreatedAt, &o.EstFinish, &o.StepTime, &o.PickupToken,
 			); err == nil {
 				res = append(res, o)
 			}
@@ -373,12 +392,13 @@ func handleOrders(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 
 	case http.MethodPost:
 		var req struct {
-			CustomerName string  `json:"customer_name"`
-			Phone        string  `json:"phone"`
-			ServiceType  string  `json:"service_type"`
-			Package      string  `json:"package"`
-			Weight       float64 `json:"weight"`
-			Notes        string  `json:"notes"`
+			CustomerName  string  `json:"customer_name"`
+			Phone         string  `json:"phone"`
+			ServiceType   string  `json:"service_type"`
+			Package       string  `json:"package"`
+			PaymentMethod string  `json:"payment_method"`
+			Weight        float64 `json:"weight"`
+			Notes         string  `json:"notes"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Data pesanan tidak valid"})
@@ -390,17 +410,25 @@ func handleOrders(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 			return
 		}
 
+		payMethod := strings.TrimSpace(req.PaymentMethod)
+		if payMethod != "Tunai" && payMethod != "QRIS" {
+			payMethod = "QRIS"
+		}
+
 		var nextNum int
-		if err := conn.QueryRow(`SELECT nextval('order_seq')`).Scan(&nextNum); err != nil {
+		if err := conn.QueryRowContext(ctx, `SELECT nextval('order_seq')`).Scan(&nextNum); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
 
+		now := nowWIB()
 		price := 7000
-		est := "2 hari ke depan · 17.00"
+		estDate := now.Add(48 * time.Hour)
+		est := fmt.Sprintf("%02d %s · 17.00 WIB", estDate.Day(), bulanShort[estDate.Month()])
 		if req.Package == "Ekspres" {
 			price = 14000
-			est = fmt.Sprintf("Hari ini, %s", time.Now().Add(8*time.Hour).Format("15.04"))
+			estTime := now.Add(8 * time.Hour)
+			est = fmt.Sprintf("Hari ini, %02d.%02d WIB", estTime.Hour(), estTime.Minute())
 		}
 
 		o := Order{
@@ -415,22 +443,23 @@ func handleOrders(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 			Total:         int(math.Round(req.Weight * float64(price))),
 			Status:        "Antre",
 			PaymentStatus: "Lunas",
-			PaymentMethod: "QRIS",
+			PaymentMethod: payMethod,
 			RackLocation:  fmt.Sprintf("B-%02d", (nextNum%9)+1),
 			BagsCount:     1,
 			Notes:         req.Notes,
-			CreatedAt:     time.Now().Format("02 January 2006 · 15.04 WIB"),
+			CreatedAt:     fmtFullWIB(now),
 			EstFinish:     est,
-			StepTime:      time.Now().Format("02 Jan, 15.04 WIB"),
+			StepTime:      fmtShortWIB(now),
 		}
 
-		_, err := conn.Exec(
+		_, err := conn.ExecContext(
+			ctx,
 			`INSERT INTO orders (
 				id, customer_name, customer_email, phone, service_type, package,
 				weight, price_per_kg, perfume_fee, discount, total, status,
 				payment_status, payment_method, rack_location, bags_count,
-				notes, created_at, est_finish, step_time
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+				notes, created_at, est_finish, step_time, pickup_token
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,'')`,
 			o.ID, o.CustomerName, o.CustomerEmail, o.Phone, o.ServiceType, o.Package,
 			o.Weight, o.PricePerKg, o.PerfumeFee, o.Discount, o.Total, o.Status,
 			o.PaymentStatus, o.PaymentMethod, o.RackLocation, o.BagsCount,
@@ -447,7 +476,7 @@ func handleOrders(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 	}
 }
 
-func handleOrderStatus(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
+func handleOrderStatus(ctx context.Context, w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 	if r.Method != http.MethodPatch && r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -462,9 +491,10 @@ func handleOrderStatus(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 		return
 	}
 
-	nowStr := time.Now().Format("02 Jan, 15.04 WIB")
+	nowStr := fmtShortWIB(nowWIB())
 	var o Order
-	err := conn.QueryRow(
+	err := conn.QueryRowContext(
+		ctx,
 		`UPDATE orders
 		 SET status = COALESCE(NULLIF($2, ''), status),
 		     payment_status = COALESCE(NULLIF($3, ''), payment_status),
@@ -488,7 +518,110 @@ func handleOrderStatus(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 	writeJSON(w, http.StatusOK, o)
 }
 
-func handleProfile(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
+func handleGeneratePickupQR(ctx context.Context, w http.ResponseWriter, r *http.Request, conn *sql.DB) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		return
+	}
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.ID) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Kode pesanan tidak valid"})
+		return
+	}
+
+	token := "PK-" + randomToken(3)
+	res, err := conn.ExecContext(
+		ctx,
+		`UPDATE orders SET pickup_token = $2 WHERE id = $1 AND status <> 'Selesai'`,
+		req.ID, token,
+	)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Pesanan tidak ditemukan atau sudah berstatus Selesai"})
+		return
+	}
+
+	qrPayload := fmt.Sprintf("SUKI|%s|%s", req.ID, token)
+	writeJSON(w, http.StatusOK, map[string]string{
+		"id":         req.ID,
+		"token":      token,
+		"qr_payload": qrPayload,
+	})
+}
+
+func handleVerifyPickupQR(ctx context.Context, w http.ResponseWriter, r *http.Request, conn *sql.DB) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		return
+	}
+	var req struct {
+		QRPayload string `json:"qr_payload"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Payload QR tidak valid"})
+		return
+	}
+
+	raw := strings.TrimSpace(req.QRPayload)
+	var orderID, token string
+
+	if strings.HasPrefix(raw, "SUKI|") {
+		parts := strings.Split(raw, "|")
+		if len(parts) == 3 {
+			orderID = strings.TrimSpace(parts[1])
+			token = strings.TrimSpace(parts[2])
+		}
+	} else {
+		token = strings.ToUpper(raw)
+	}
+
+	if token == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Format kode QR tidak dikenali"})
+		return
+	}
+
+	nowStr := fmtShortWIB(nowWIB())
+	var o Order
+	var err error
+
+	if orderID != "" {
+		err = conn.QueryRowContext(
+			ctx,
+			`UPDATE orders
+			 SET status = 'Selesai', payment_status = 'Lunas', step_time = $3, pickup_token = ''
+			 WHERE id = $1 AND pickup_token = $2 AND status <> 'Selesai'
+			 RETURNING id, customer_name, status, payment_status, step_time`,
+			orderID, token, nowStr,
+		).Scan(&o.ID, &o.CustomerName, &o.Status, &o.PaymentStatus, &o.StepTime)
+	} else {
+		err = conn.QueryRowContext(
+			ctx,
+			`UPDATE orders
+			 SET status = 'Selesai', payment_status = 'Lunas', step_time = $2, pickup_token = ''
+			 WHERE pickup_token = $1 AND status <> 'Selesai'
+			 RETURNING id, customer_name, status, payment_status, step_time`,
+			token, nowStr,
+		).Scan(&o.ID, &o.CustomerName, &o.Status, &o.PaymentStatus, &o.StepTime)
+	}
+
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "QR tidak cocok, kedaluwarsa, atau pesanan sudah selesai"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"message": fmt.Sprintf("Pengambilan %s berhasil diverifikasi! Status kini Selesai.", o.ID),
+		"order":   o,
+	})
+}
+
+func handleProfile(ctx context.Context, w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -505,7 +638,8 @@ func handleProfile(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 	}
 
 	var u User
-	err := conn.QueryRow(
+	err := conn.QueryRowContext(
+		ctx,
 		`UPDATE users
 		 SET phone = COALESCE(NULLIF($2, ''), phone),
 		     notif_end = $3,
@@ -521,7 +655,7 @@ func handleProfile(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 	writeJSON(w, http.StatusOK, u)
 }
 
-func handleChat(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
+func handleChat(ctx context.Context, w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -534,7 +668,8 @@ func handleChat(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 	msg := strings.ToLower(req.Message)
 
 	var active Order
-	err := conn.QueryRow(
+	err := conn.QueryRowContext(
+		ctx,
 		`SELECT id, status, step_time, est_finish
 		 FROM orders
 		 WHERE LOWER(customer_email) = LOWER($1) AND status <> 'Selesai'
@@ -560,6 +695,6 @@ func handleChat(w http.ResponseWriter, r *http.Request, conn *sql.DB) {
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"reply": reply,
-		"time":  time.Now().Format("15.04"),
+		"time":  nowWIB().Format("15.04"),
 	})
 }

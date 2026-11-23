@@ -13,8 +13,12 @@ const PelangganApp = (() => {
 
   let orders = [];
   let selectedOrderId = null;
+  let html5Qr = null;
+  let isVerifyingQR = false;
+
+  const initTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
   let chatHistory = [
-    { sender: 'ai', text: `Halo, ${user.name.split(' ')[0]}! Aku bisa bantu cek cucian, harga, atau jam buka outlet.`, time: '14.12' }
+    { sender: 'ai', text: `Halo, ${user.name.split(' ')[0]}! Aku bisa bantu cek cucian, harga, atau jam buka outlet.`, time: initTime }
   ];
 
   function getActiveOrder() {
@@ -39,6 +43,7 @@ const PelangganApp = (() => {
   }
 
   async function navigate(route, push = true) {
+    await closeScanner();
     if (!ROUTES.includes(route)) route = 'beranda';
     if (push) history.pushState({ route }, '', `/pelanggan/${route}`);
     updateNavHighlight(route);
@@ -88,6 +93,11 @@ const PelangganApp = (() => {
         </div>
         <i data-lucide="clock" class="w-6 h-6 text-ink"></i>
       </div>
+      ${hero.status === 'Siap Diambil' ? `
+        <button onclick="PelangganApp.openScanner()" class="w-full mt-4 py-2.5 px-4 rounded-2xl bg-tealbrand hover:bg-tealdark text-white font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer">
+          <i data-lucide="scan-line" class="w-4 h-4"></i> Scan QR Pengambilan di Kasir
+        </button>
+      ` : ''}
       <button onclick="PelangganApp.openOrder('${hero.id}', 'lacak')" class="w-full mt-5 pt-3 border-t border-ink/10 flex items-center justify-between text-sm font-bold text-ink cursor-pointer">
         <span>Lacak cucianmu</span><i data-lucide="arrow-right" class="w-5 h-5"></i>
       </button>
@@ -163,11 +173,11 @@ const PelangganApp = (() => {
             <div class="text-lg font-extrabold text-ink">${o.id}</div>
             <div class="text-xs text-inksoft mt-0.5">${o.created_at}</div>
           </div>
-          <span class="px-3.5 py-1 rounded-full bg-aqua text-ink text-xs font-bold">${o.payment_status}</span>
+          <span class="px-3.5 py-1 rounded-full bg-aqua text-ink text-xs font-bold">${o.payment_status} · ${o.payment_method}</span>
         </div>
         <div class="bg-mutedbox/70 rounded-2xl p-3.5">
           <div class="text-sm font-bold text-ink">${o.package} · ${o.service_type}</div>
-          <div class="text-xs text-inksoft mt-0.5">Berat cucian: ${o.weight} kg</div>
+          <div class="text-xs text-inksoft mt-0.5">Berat cucian: ${o.weight} kg · Status: ${o.status}</div>
         </div>
         <div class="space-y-2 text-sm border-b border-mutedbox pb-3">
           <div class="flex justify-between"><span>${o.weight} kg × ${SukiAPI.fmtRp(o.price_per_kg)}</span><span>${SukiAPI.fmtRp(base)}</span></div>
@@ -183,8 +193,8 @@ const PelangganApp = (() => {
             <path d="M0 0h7v7H0V0zm1 1v5h5V1H1zm1 1h3v3H2V2zm12-2h7v7h-7V0zm1 1v5h5V1h-5zm1 1h3v3h-3V2zM0 14h7v7H0v-7zm1 1v5h5v-5H1zm1 1h3v3H2v-3zm7-14h2v2H9V2zm3 0h1v3h-1V2zM9 6h3v2H9V6zm5 2h2v3h-2V8zm3 0h2v2h-2V8zM8 9h2v4H8V9zm3 1h2v2h-2v-2zm3 2h3v2h-3v-2zm4-1h3v2h-3v-2zM9 14h2v3H9v-3zm3 1h3v2h-3v-2zm4 0h2v3h-2v-3zm3 2h2v4h-2v-4zm-9 2h3v2h-3v-2zm4 0h3v2h-3v-2z"/>
           </svg>
           <div>
-            <div class="font-bold text-sm text-ink">Tunjukkan saat pengambilan</div>
-            <p class="text-xs text-inksoft mt-1 leading-relaxed">Simpan nota ini. Petugas akan memindai kode QR-mu.</p>
+            <div class="font-bold text-sm text-ink">Ambil cucian dengan QR</div>
+            <p class="text-xs text-inksoft mt-1 leading-relaxed">Tekan tombol Scan QR di atas lalu arahkan kamera ke layar kasir saat pengambilan.</p>
           </div>
         </div>
       </div>
@@ -218,6 +228,79 @@ const PelangganApp = (() => {
       ? 'py-2.5 rounded-xl bg-tealbrand text-white font-bold text-sm transition cursor-pointer'
       : 'py-2.5 rounded-xl text-ink font-semibold text-sm transition cursor-pointer';
     activeBox.classList.toggle('hidden', !isNota);
+  }
+
+  // --- Kamera QR Scanner & Verifikasi ---
+  async function openScanner() {
+    const modal = document.getElementById('scanModal');
+    const fb = document.getElementById('scanFeedback');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    fb.classList.add('hidden');
+    document.getElementById('manualQRInput').value = '';
+    lucide.createIcons();
+
+    try {
+      html5Qr = new Html5Qrcode('qr-reader');
+      await html5Qr.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        async (decodedText) => {
+          if (isVerifyingQR) return;
+          isVerifyingQR = true;
+          await processQRPayload(decodedText);
+        }
+      );
+    } catch (err) {
+      fb.textContent = 'Kamera tidak tersedia atau izin ditolak. Gunakan input kode manual di bawah.';
+      fb.className = 'text-xs font-semibold px-3.5 py-2.5 rounded-xl bg-amber-50 text-amber-800 border border-amber-200';
+      fb.classList.remove('hidden');
+    }
+  }
+
+  async function closeScanner() {
+    isVerifyingQR = false;
+    if (html5Qr) {
+      try {
+        if (html5Qr.isScanning) await html5Qr.stop();
+        html5Qr.clear();
+      } catch (_) {}
+      html5Qr = null;
+    }
+    document.getElementById('scanModal')?.classList.add('hidden');
+  }
+
+  async function submitManualQR() {
+    const val = document.getElementById('manualQRInput')?.value.trim();
+    if (!val) return;
+    await processQRPayload(val);
+  }
+
+  async function processQRPayload(payload) {
+    const fb = document.getElementById('scanFeedback');
+    try {
+      const res = await fetch('/api/orders/verify-qr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ qr_payload: payload })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Kode QR tidak valid');
+
+      fb.textContent = '✓ ' + data.message;
+      fb.className = 'text-xs font-semibold px-3.5 py-2.5 rounded-xl bg-aqua text-ink';
+      fb.classList.remove('hidden');
+
+      setTimeout(async () => {
+        await closeScanner();
+        await navigate(getRouteFromURL(), false);
+      }, 1400);
+    } catch (err) {
+      isVerifyingQR = false;
+      fb.textContent = '✕ ' + err.message;
+      fb.className = 'text-xs font-semibold px-3.5 py-2.5 rounded-xl bg-red-50 text-red-700 border border-red-200';
+      fb.classList.remove('hidden');
+    }
   }
 
   function renderChatBox() {
@@ -308,5 +391,8 @@ const PelangganApp = (() => {
   window.addEventListener('popstate', () => navigate(getRouteFromURL(), false));
   navigate(getRouteFromURL(), false);
 
-  return { navigate, openOrder, setNotaMode, sendChat, toggleNotif, saveProfile };
+  return {
+    navigate, openOrder, setNotaMode, sendChat,
+    toggleNotif, saveProfile, openScanner, closeScanner, submitManualQR
+  };
 })();

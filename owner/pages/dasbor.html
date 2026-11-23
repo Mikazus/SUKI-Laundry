@@ -1,8 +1,8 @@
 <section id="page-dasbor" class="space-y-6">
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-2xl font-extrabold text-ink">Selamat pagi, Bu Ayu</h1>
-      <p class="text-xs text-inksoft mt-0.5">Ini ringkasan operasional laundry Anda hari ini.</p>
+      <h1 id="dasborGreeting" class="text-2xl font-extrabold text-ink">Selamat pagi, Bu Ayu</h1>
+      <p id="dasborSubDate" class="text-xs text-inksoft mt-0.5">Ini ringkasan operasional laundry Anda hari ini.</p>
     </div>
     <button onclick="switchPage('pesanan-baru')" class="px-5 py-2.5 rounded-xl bg-tealbrand hover:bg-tealdark text-white font-bold text-sm transition cursor-pointer">
       + Pesanan Baru
@@ -17,7 +17,7 @@
     <div class="col-span-2 bg-white rounded-3xl p-6 shadow-sm">
       <div class="flex items-center gap-3 mb-6">
         <h2 class="text-base font-bold text-ink">Pendapatan mingguan</h2>
-        <span class="text-xs text-inksoft">10–16 Nov 2026</span>
+        <span id="weekRangeLabel" class="text-xs text-inksoft"></span>
       </div>
       <div id="weeklyChart" class="grid grid-cols-7 gap-3 items-end h-36 px-2"></div>
       <div class="flex items-center gap-4 mt-5 text-xs">
@@ -29,7 +29,7 @@
     <div class="bg-aqua rounded-3xl p-6 shadow-sm flex flex-col justify-between">
       <div>
         <div class="text-sm font-semibold text-ink">Prioritas hari ini</div>
-        <div id="expressCountLabel" class="text-3xl font-extrabold text-ink mt-2">04 pesanan ekspres</div>
+        <div id="expressCountLabel" class="text-3xl font-extrabold text-ink mt-2">00 pesanan ekspres</div>
         <p class="text-xs text-ink/80 mt-2 leading-relaxed">Dahulukan pesanan ekspres agar selesai tepat waktu.</p>
       </div>
       <button onclick="switchPage('antrean')" class="w-full mt-5 py-3 rounded-xl bg-white hover:bg-white/90 text-ink font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer">
