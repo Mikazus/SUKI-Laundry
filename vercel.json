@@ -1,0 +1,10 @@
+{
+  "rewrites": [
+    { "source": "/", "destination": "/login.html" },
+    { "source": "/api/(.*)", "destination": "/api/index.go" },
+    { "source": "/pelanggan", "destination": "/pelanggan/index.html" },
+    { "source": "/pelanggan/(beranda|lacak|nota|bantuan|profil)", "destination": "/pelanggan/index.html" },
+    { "source": "/owner", "destination": "/owner/index.html" },
+    { "source": "/owner/(dasbor|pesanan-baru|antrean|verifikasi|rekap)", "destination": "/owner/index.html" }
+  ]
+}
