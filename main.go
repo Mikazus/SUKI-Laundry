@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,13 +12,30 @@ import (
 	handler "suki-laundry/api"
 )
 
-func main() {
-	mux := http.NewServeMux()
+func loadEnv(filename string) {
+	f, err := os.Open(filename)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if k, v, ok := strings.Cut(line, "="); ok {
+			_ = os.Setenv(strings.TrimSpace(k), strings.Trim(strings.TrimSpace(v), `"'`))
+		}
+	}
+}
 
-	// Semua request /api/* diteruskan ke handler bersama di api/index.go
+func main() {
+	loadEnv(".env")
+
+	mux := http.NewServeMux()
 	mux.HandleFunc("/api/", handler.Handler)
 
-	// Static files + Clean URL Fallback Routing
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
 		if p == "/" {
@@ -25,14 +43,12 @@ func main() {
 			return
 		}
 
-		// Sajikan file fisik jika ada (.html partial, .js, login.html, dll.)
 		cleanPath := filepath.Clean(strings.TrimPrefix(p, "/"))
 		if info, err := os.Stat(cleanPath); err == nil && !info.IsDir() {
 			http.ServeFile(w, r, cleanPath)
 			return
 		}
 
-		// Fallback untuk clean URL SPA per role
 		switch {
 		case strings.HasPrefix(p, "/pelanggan"):
 			http.ServeFile(w, r, "pelanggan/index.html")
