@@ -1,11 +1,10 @@
-<section id="page-pesanan-baru" class="space-y-5">
+<section class="space-y-5">
   <div>
     <h1 class="text-2xl font-extrabold text-ink">Pesanan Baru</h1>
     <p class="text-xs text-inksoft mt-0.5">Catat cucian masuk. Harga dan estimasi selesai dihitung otomatis.</p>
   </div>
 
   <div class="grid grid-cols-3 gap-6 items-start">
-    <!-- Form -->
     <div class="col-span-2 bg-white rounded-3xl p-6 shadow-sm space-y-5">
       <div>
         <h2 class="text-base font-bold text-ink">Informasi pelanggan</h2>
@@ -20,7 +19,7 @@
         </div>
         <div>
           <label class="block text-xs font-bold text-ink mb-1.5">Nomor WhatsApp *</label>
-          <input id="newPhone" type="text" placeholder="0812 3456 7890" oninput="calcNewOrder()"
+          <input id="newPhone" type="text" placeholder="0812 3456 7890" oninput="OwnerApp.calcNewOrder()"
             class="w-full px-3.5 py-2.5 rounded-xl border border-borderline text-sm focus:outline-none focus:border-tealbrand" />
           <p id="phoneWarn" class="text-[11px] text-inksoft mt-1 font-medium">! Nomor WhatsApp minimal 10 digit.</p>
         </div>
@@ -29,7 +28,7 @@
       <div class="grid grid-cols-3 gap-4">
         <div class="col-span-2">
           <label class="block text-xs font-bold text-ink mb-1.5">Jenis laundry *</label>
-          <select id="newService" onchange="calcNewOrder()" class="w-full px-3.5 py-2.5 rounded-xl border border-borderline text-sm bg-white focus:outline-none focus:border-tealbrand">
+          <select id="newService" onchange="OwnerApp.calcNewOrder()" class="w-full px-3.5 py-2.5 rounded-xl border border-borderline text-sm bg-white focus:outline-none focus:border-tealbrand">
             <option value="Cuci + setrika">Cuci + setrika</option>
             <option value="Cuci kering">Cuci kering</option>
             <option value="Setrika saja">Setrika saja</option>
@@ -37,27 +36,53 @@
         </div>
         <div>
           <label class="block text-xs font-bold text-ink mb-1.5">Berat (kg) *</label>
-          <input id="newWeight" type="number" step="0.5" min="0.5" value="3" oninput="calcNewOrder()"
+          <input id="newWeight" type="number" step="0.5" min="0.5" value="3" oninput="OwnerApp.calcNewOrder()"
             class="w-full px-3.5 py-2.5 rounded-xl border border-borderline text-sm focus:outline-none focus:border-tealbrand" />
         </div>
       </div>
 
+      <!-- Paket Layanan (Radio Dot Tersinkronisasi) -->
       <div>
         <label class="block text-xs font-bold text-ink mb-2">Paket layanan *</label>
         <div class="grid grid-cols-2 gap-4">
-          <button type="button" id="pkgReguler" onclick="selectPkg('Reguler')"
-            class="p-4 rounded-2xl border border-borderline text-left transition cursor-pointer">
-            <div class="font-bold text-sm text-ink flex items-center gap-2">
-              <span class="w-3.5 h-3.5 rounded-full border-2 border-ink inline-block"></span> Reguler
+          <button type="button" id="pkgReguler" onclick="OwnerApp.selectPkg('Reguler')"
+            class="p-4 rounded-2xl border border-borderline bg-white text-left transition cursor-pointer">
+            <div class="font-bold text-sm text-ink flex items-center gap-2.5">
+              <span id="dotReguler" class="w-4 h-4 rounded-full border-2 border-inksoft inline-flex items-center justify-center shrink-0"></span>
+              <span>Reguler</span>
             </div>
-            <div class="text-xs text-inksoft mt-1">2 hari · Rp7.000/kg</div>
+            <div class="text-xs text-inksoft mt-1 pl-6">2 hari · Rp7.000/kg</div>
           </button>
-          <button type="button" id="pkgEkspres" onclick="selectPkg('Ekspres')"
-            class="p-4 rounded-2xl bg-aqua border border-aqua text-left transition cursor-pointer">
-            <div class="font-bold text-sm text-ink flex items-center gap-2">
-              <span class="w-3.5 h-3.5 rounded-full border-4 border-ink bg-white inline-block"></span> Ekspres
+          <button type="button" id="pkgEkspres" onclick="OwnerApp.selectPkg('Ekspres')"
+            class="p-4 rounded-2xl border border-aqua bg-aqua text-left transition cursor-pointer">
+            <div class="font-bold text-sm text-ink flex items-center gap-2.5">
+              <span id="dotEkspres" class="w-4 h-4 rounded-full border-2 border-ink inline-flex items-center justify-center shrink-0"></span>
+              <span>Ekspres</span>
             </div>
-            <div class="text-xs text-ink/80 mt-1">8 jam · Rp14.000/kg</div>
+            <div class="text-xs text-ink/80 mt-1 pl-6">8 jam · Rp14.000/kg</div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Metode Pembayaran: QRIS atau Tunai -->
+      <div>
+        <label class="block text-xs font-bold text-ink mb-2">Metode pembayaran *</label>
+        <div class="grid grid-cols-2 gap-4">
+          <button type="button" id="payQris" onclick="OwnerApp.selectPayment('QRIS')"
+            class="p-4 rounded-2xl border border-aqua bg-aqua text-left transition cursor-pointer">
+            <div class="font-bold text-sm text-ink flex items-center gap-2.5">
+              <span id="dotQris" class="w-4 h-4 rounded-full border-2 border-ink inline-flex items-center justify-center shrink-0"></span>
+              <span>QRIS</span>
+            </div>
+            <div class="text-xs text-ink/80 mt-1 pl-6">Nontunai · Scan instan</div>
+          </button>
+          <button type="button" id="payTunai" onclick="OwnerApp.selectPayment('Tunai')"
+            class="p-4 rounded-2xl border border-borderline bg-white text-left transition cursor-pointer">
+            <div class="font-bold text-sm text-ink flex items-center gap-2.5">
+              <span id="dotTunai" class="w-4 h-4 rounded-full border-2 border-inksoft inline-flex items-center justify-center shrink-0"></span>
+              <span>Tunai</span>
+            </div>
+            <div class="text-xs text-inksoft mt-1 pl-6">Bayar cash di kasir</div>
           </button>
         </div>
       </div>
@@ -69,39 +94,38 @@
       </div>
 
       <div class="bg-mutedbox/70 rounded-xl px-4 py-3 text-xs text-inksoft">
-        Nota akan dikirim setelah nomor WhatsApp valid.
+        Nota akan dikirim setelah nomor WhatsApp valid dan tersimpan ke Neon DB.
       </div>
     </div>
 
-    <!-- Summary -->
+    <!-- Ringkasan Pesanan -->
     <div class="space-y-3">
       <div class="bg-white rounded-3xl p-6 shadow-sm space-y-4">
         <div class="flex items-center justify-between">
           <h2 class="text-base font-bold text-ink">Ringkasan pesanan</h2>
           <span class="px-3 py-1 rounded-full bg-aqua text-ink text-[11px] font-bold">Otomatis</span>
         </div>
-        <div class="bg-mutedbox/70 rounded-xl px-3.5 py-2.5 text-xs font-bold text-ink">
-          #SK-BARU · Hari ini
-        </div>
+        <div id="sumDateBadge" class="bg-mutedbox/70 rounded-xl px-3.5 py-2.5 text-xs font-bold text-ink"></div>
         <div class="space-y-2 text-xs">
-          <div class="flex justify-between"><span id="sumService" class="text-inksoft">Cuci + setrika</span><span id="sumWeight" class="font-bold">3,0 kg</span></div>
-          <div class="flex justify-between"><span id="sumPkg" class="text-inksoft">Paket Ekspres</span><span id="sumRate" class="font-bold">Rp14.000/kg</span></div>
-          <div class="flex justify-between"><span class="text-inksoft">Subtotal</span><span id="sumSub" class="font-bold">Rp42.000</span></div>
+          <div class="flex justify-between"><span id="sumService" class="text-inksoft"></span><span id="sumWeight" class="font-bold"></span></div>
+          <div class="flex justify-between"><span id="sumPkg" class="text-inksoft"></span><span id="sumRate" class="font-bold"></span></div>
+          <div class="flex justify-between"><span class="text-inksoft">Pembayaran</span><span id="sumPayMethod" class="font-bold"></span></div>
+          <div class="flex justify-between"><span class="text-inksoft">Subtotal</span><span id="sumSub" class="font-bold"></span></div>
         </div>
         <div class="bg-aqua rounded-2xl p-4 flex items-center justify-between">
           <span class="text-xs font-bold text-ink">Total</span>
-          <span id="sumTotal" class="text-2xl font-extrabold text-ink">Rp42.000</span>
+          <span id="sumTotal" class="text-2xl font-extrabold text-ink"></span>
         </div>
         <div>
           <div class="text-[10px] font-bold uppercase text-inksoft">Estimasi Selesai</div>
-          <div id="sumEst" class="text-base font-extrabold text-ink mt-0.5">Hari ini · 8 jam</div>
+          <div id="sumEst" class="text-base font-extrabold text-ink mt-0.5"></div>
         </div>
       </div>
 
-      <button onclick="submitNewOrder()" class="w-full py-3.5 rounded-xl bg-tealbrand hover:bg-tealdark text-white font-bold text-sm transition cursor-pointer">
+      <button onclick="OwnerApp.submitNewOrder()" class="w-full py-3.5 rounded-xl bg-tealbrand hover:bg-tealdark text-white font-bold text-sm transition cursor-pointer">
         Simpan dan Kirim Nota ke WhatsApp
       </button>
-      <button onclick="switchPage('dasbor')" class="w-full py-3 rounded-xl bg-white border border-borderline text-ink font-bold text-xs hover:bg-mutedbox/40 transition cursor-pointer">
+      <button onclick="OwnerApp.navigate('dasbor')" class="w-full py-3 rounded-xl bg-white border border-borderline text-ink font-bold text-xs hover:bg-mutedbox/40 transition cursor-pointer">
         Batal
       </button>
     </div>

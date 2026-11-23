@@ -7,14 +7,16 @@ const PelangganApp = (() => {
     'Antre': { pct: 25, label: 'Sedang antre', desc: 'Pesanan sudah diterima oleh outlet.', step: 0 },
     'Dicuci': { pct: 50, label: 'Sedang dicuci', desc: 'Cucian sedang dibersihkan dengan teliti.', step: 1 },
     'Disetrika': { pct: 75, label: 'Sedang disetrika', desc: 'Sebentar lagi rapi dan siap menemanimu.', step: 2 },
-    'Siap Diambil': { pct: 100, label: 'Siap diambil', desc: 'Cucianmu sudah rapi di rak dan siap diambil.', step: 3 },
+    'Siap Diambil': { pct: 100, label: 'Siap diambil', desc: 'Scan QR kasir saat mengambil cucianmu.', step: 3 },
     'Selesai': { pct: 100, label: 'Selesai', desc: 'Terima kasih sudah mencuci di SUKI Laundry.', step: 4 }
   };
 
   let orders = [];
   let selectedOrderId = null;
+  let html5Scanner = null;
+  let isVerifyingQR = false;
   let chatHistory = [
-    { sender: 'ai', text: `Halo, ${user.name.split(' ')[0]}! Aku bisa bantu cek cucian, harga, atau jam buka outlet.`, time: '14.12' }
+    { sender: 'ai', text: `Halo, ${user.name.split(' ')[0]}! Aku bisa bantu cek cucian, harga, atau jam buka outlet.`, time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) }
   ];
 
   function getActiveOrder() {
@@ -39,6 +41,7 @@ const PelangganApp = (() => {
   }
 
   async function navigate(route, push = true) {
+    await closeScanner();
     if (!ROUTES.includes(route)) route = 'beranda';
     if (push) history.pushState({ route }, '', `/pelanggan/${route}`);
     updateNavHighlight(route);
@@ -46,9 +49,14 @@ const PelangganApp = (() => {
     const html = await fetch(`/pelanggan/pages/${route}.html`).then(r => r.text());
     document.getElementById('app-view').innerHTML = html;
 
-    orders = await SukiAPI.getOrders(user.email);
-    if (!selectedOrderId && orders.length) selectedOrderId = orders[0].id;
+    try {
+      orders = await SukiAPI.getOrders(user.email);
+    } catch (e) {
+      document.getElementById('app-view').innerHTML = `<div class="bg-white rounded-3xl p-6 text-sm text-red-700">${e.message}</div>`;
+      return;
+    }
 
+    if (!selectedOrderId && orders.length) selectedOrderId = orders[0].id;
     const initializers = {
       beranda: initBeranda,
       lacak: initLacak,
@@ -65,6 +73,72 @@ const PelangganApp = (() => {
     navigate(targetRoute);
   }
 
+  // --- KAMERA SCANNER QR ---
+  function showScanFeedback(text, isSuccess) {
+    const el = document.getElementById('scanFeedback');
+    el.textContent = text;
+    el.className = isSuccess
+      ? 'rounded-2xl px-4 py-3 text-xs font-bold bg-aqua text-ink'
+      : 'rounded-2xl px-4 py-3 text-xs font-semibold bg-red-50 border border-red-200 text-red-700';
+    el.classList.remove('hidden');
+  }
+
+  async function processScannedPayload(payload) {
+    if (isVerifyingQR || !payload.trim()) return;
+    isVerifyingQR = true;
+    showScanFeedback('Memverifikasi kode QR ke kasir...', true);
+    try {
+      const res = await SukiAPI.verifyPickupQR(payload.trim(), user.email);
+      showScanFeedback(`✓ ${res.message}`, true);
+      if (html5Scanner) {
+        await html5Scanner.stop().catch(() => {});
+        html5Scanner = null;
+      }
+      setTimeout(async () => {
+        await closeScanner();
+        navigate(getRouteFromURL(), false);
+      }, 1500);
+    } catch (err) {
+      showScanFeedback(err.message, false);
+    } finally {
+      setTimeout(() => { isVerifyingQR = false; }, 1200);
+    }
+  }
+
+  async function openScanner() {
+    document.getElementById('scanModal').classList.remove('hidden');
+    document.getElementById('scanFeedback').classList.add('hidden');
+    document.getElementById('manualQrInput').value = '';
+    lucide.createIcons();
+
+    try {
+      html5Scanner = new Html5Qrcode('qrReader');
+      await html5Scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        (decodedText) => processScannedPayload(decodedText),
+        () => {}
+      );
+    } catch (err) {
+      showScanFeedback('Kamera tidak tersedia atau izin ditolak (wajib HTTPS / localhost). Gunakan kolom kode manual di bawah untuk menguji.', false);
+    }
+  }
+
+  async function closeScanner() {
+    if (html5Scanner) {
+      await html5Scanner.stop().catch(() => {});
+      html5Scanner.clear();
+      html5Scanner = null;
+    }
+    document.getElementById('scanModal')?.classList.add('hidden');
+  }
+
+  function submitManualQR() {
+    const val = document.getElementById('manualQrInput').value;
+    processScannedPayload(val);
+  }
+
+  // --- CONTROLLERS ---
   function initBeranda() {
     document.getElementById('greetName').textContent = user.name.split(' ')[0];
     const hero = orders.find(o => o.status !== 'Selesai') || orders[0];
@@ -123,12 +197,12 @@ const PelangganApp = (() => {
       { name: 'Antre', time: o.created_at, desc: 'Pesanan diterima oleh outlet.' },
       { name: 'Dicuci', time: 'Proses pencucian', desc: 'Cucian sudah bersih dan kering.' },
       { name: 'Disetrika', time: o.step_time, desc: 'Tim kami sedang merapikan cucian.' },
-      { name: 'Siap Diambil', time: curStep >= 3 ? o.step_time : 'Menunggu proses selesai', desc: curStep >= 3 ? `Tersimpan di Rak ${o.rack_location}.` : 'Kami kabari saat cucian siap.' }
+      { name: 'Siap Diambil', time: curStep >= 3 ? o.step_time : 'Menunggu proses selesai', desc: curStep >= 3 ? `Tersimpan di Rak ${o.rack_location}. Scan QR kasir saat ambil.` : 'Kami kabari saat cucian siap.' }
     ];
 
     document.getElementById('trackTimeline').innerHTML = steps.map((st, idx) => {
-      const done = idx < curStep;
-      const active = idx === curStep;
+      const done = idx < curStep || o.status === 'Selesai';
+      const active = idx === curStep && o.status !== 'Selesai';
       const circleCls = active ? 'bg-tealbrand text-white' : (done ? 'bg-aqua text-ink' : 'bg-mutedbox text-inksoft');
       const iconName = done ? 'check' : (active ? 'shirt' : 'lock');
       const boxCls = active ? 'bg-aqua rounded-2xl p-3.5' : 'py-1';
@@ -163,11 +237,11 @@ const PelangganApp = (() => {
             <div class="text-lg font-extrabold text-ink">${o.id}</div>
             <div class="text-xs text-inksoft mt-0.5">${o.created_at}</div>
           </div>
-          <span class="px-3.5 py-1 rounded-full bg-aqua text-ink text-xs font-bold">${o.payment_status}</span>
+          <span class="px-3.5 py-1 rounded-full bg-aqua text-ink text-xs font-bold">${o.payment_status} · ${o.payment_method}</span>
         </div>
         <div class="bg-mutedbox/70 rounded-2xl p-3.5">
           <div class="text-sm font-bold text-ink">${o.package} · ${o.service_type}</div>
-          <div class="text-xs text-inksoft mt-0.5">Berat cucian: ${o.weight} kg</div>
+          <div class="text-xs text-inksoft mt-0.5">Berat cucian: ${o.weight} kg · Status: ${o.status}</div>
         </div>
         <div class="space-y-2 text-sm border-b border-mutedbox pb-3">
           <div class="flex justify-between"><span>${o.weight} kg × ${SukiAPI.fmtRp(o.price_per_kg)}</span><span>${SukiAPI.fmtRp(base)}</span></div>
@@ -177,15 +251,6 @@ const PelangganApp = (() => {
         <div class="flex items-center justify-between">
           <span class="font-bold text-sm">Total</span>
           <span class="text-2xl font-extrabold text-ink">${SukiAPI.fmtRp(o.total)}</span>
-        </div>
-        <div class="flex items-center gap-4 pt-2">
-          <svg viewBox="0 0 21 21" class="w-24 h-24 shrink-0 text-ink" fill="currentColor">
-            <path d="M0 0h7v7H0V0zm1 1v5h5V1H1zm1 1h3v3H2V2zm12-2h7v7h-7V0zm1 1v5h5V1h-5zm1 1h3v3h-3V2zM0 14h7v7H0v-7zm1 1v5h5v-5H1zm1 1h3v3H2v-3zm7-14h2v2H9V2zm3 0h1v3h-1V2zM9 6h3v2H9V6zm5 2h2v3h-2V8zm3 0h2v2h-2V8zM8 9h2v4H8V9zm3 1h2v2h-2v-2zm3 2h3v2h-3v-2zm4-1h3v2h-3v-2zM9 14h2v3H9v-3zm3 1h3v2h-3v-2zm4 0h2v3h-2v-3zm3 2h2v4h-2v-4zm-9 2h3v2h-3v-2zm4 0h3v2h-3v-2z"/>
-          </svg>
-          <div>
-            <div class="font-bold text-sm text-ink">Tunjukkan saat pengambilan</div>
-            <p class="text-xs text-inksoft mt-1 leading-relaxed">Simpan nota ini. Petugas akan memindai kode QR-mu.</p>
-          </div>
         </div>
       </div>
     `;
@@ -211,12 +276,8 @@ const PelangganApp = (() => {
     const segR = document.getElementById('segRiwayat');
     const activeBox = document.getElementById('notaActiveContainer');
     const isNota = mode === 'nota';
-    segN.className = isNota
-      ? 'py-2.5 rounded-xl bg-tealbrand text-white font-bold text-sm transition cursor-pointer'
-      : 'py-2.5 rounded-xl text-ink font-semibold text-sm transition cursor-pointer';
-    segR.className = !isNota
-      ? 'py-2.5 rounded-xl bg-tealbrand text-white font-bold text-sm transition cursor-pointer'
-      : 'py-2.5 rounded-xl text-ink font-semibold text-sm transition cursor-pointer';
+    segN.className = isNota ? 'py-2.5 rounded-xl bg-tealbrand text-white font-bold text-sm transition cursor-pointer' : 'py-2.5 rounded-xl text-ink font-semibold text-sm transition cursor-pointer';
+    segR.className = !isNota ? 'py-2.5 rounded-xl bg-tealbrand text-white font-bold text-sm transition cursor-pointer' : 'py-2.5 rounded-xl text-ink font-semibold text-sm transition cursor-pointer';
     activeBox.classList.toggle('hidden', !isNota);
   }
 
@@ -286,15 +347,13 @@ const PelangganApp = (() => {
     const inp = document.getElementById('profPhone');
     if (inp) user.phone = inp.value;
     const ok = await SukiAPI.updateProfile({
-      email: user.email,
-      phone: user.phone,
-      notif_end: user.notif_end,
-      notif_chg: user.notif_chg
+      email: user.email, phone: user.phone,
+      notif_end: user.notif_end, notif_chg: user.notif_chg
     });
     if (ok) {
       localStorage.setItem('suki_user', JSON.stringify(user));
       const msg = document.getElementById('profMsg');
-      if (msg) msg.textContent = '✓ Pengaturan akun berhasil disimpan.';
+      if (msg) msg.textContent = '✓ Pengaturan akun berhasil disimpan ke Neon DB.';
     }
   }
 
@@ -308,5 +367,8 @@ const PelangganApp = (() => {
   window.addEventListener('popstate', () => navigate(getRouteFromURL(), false));
   navigate(getRouteFromURL(), false);
 
-  return { navigate, openOrder, setNotaMode, sendChat, toggleNotif, saveProfile };
+  return {
+    navigate, openOrder, setNotaMode, sendChat,
+    toggleNotif, saveProfile, openScanner, closeScanner, submitManualQR
+  };
 })();
