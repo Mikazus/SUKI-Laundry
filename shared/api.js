@@ -14,20 +14,31 @@ window.SukiAPI = {
     localStorage.removeItem('suki_user');
     window.location.href = '/login.html';
   },
+  async parseResponse(res) {
+    const raw = await res.text();
+    let data = {};
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch {
+      throw new Error(`Respons server bukan JSON (HTTP ${res.status}).`);
+    }
+    if (!res.ok) {
+      throw new Error(data.error || `Gagal (HTTP ${res.status})`);
+    }
+    return data;
+  },
   async login(identifier, password) {
     const res = await fetch('/api/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ identifier, password })
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Gagal masuk');
-    return data;
+    return this.parseResponse(res);
   },
   async getOrders(email = '') {
     const q = email ? `?email=${encodeURIComponent(email)}` : '';
     const res = await fetch('/api/orders' + q);
-    return res.json();
+    return this.parseResponse(res);
   },
   async createOrder(payload) {
     const res = await fetch('/api/orders', {
@@ -35,9 +46,7 @@ window.SukiAPI = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Gagal menyimpan pesanan');
-    return data;
+    return this.parseResponse(res);
   },
   async updateOrderStatus(id, status, payment_status = '') {
     const res = await fetch('/api/orders/status', {
@@ -46,6 +55,22 @@ window.SukiAPI = {
       body: JSON.stringify({ id, status, payment_status })
     });
     return res.ok;
+  },
+  async generatePickupQR(id) {
+    const res = await fetch('/api/orders/pickup-qr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    return this.parseResponse(res);
+  },
+  async verifyPickupQR(qr_payload) {
+    const res = await fetch('/api/orders/verify-qr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ qr_payload })
+    });
+    return this.parseResponse(res);
   },
   async updateProfile(payload) {
     const res = await fetch('/api/profile', {
@@ -61,6 +86,6 @@ window.SukiAPI = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, email })
     });
-    return res.json();
+    return this.parseResponse(res);
   }
 };

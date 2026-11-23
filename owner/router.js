@@ -8,17 +8,61 @@ if (document.getElementById('ownerName')) {
 
 let orders = [];
 let selectedPkg = 'Ekspres';
-const fmtRp = (n) => 'Rp' + Number(n).toLocaleString('id-ID');
+let selectedPayment = 'QRIS';
+let qrPollTimer = null;
 
-const chartData = [
-  { day: 'Sel', label: '900.000', h: 55 },
-  { day: 'Rab', label: '1.100.000', h: 72 },
-  { day: 'Kam', label: '800.000', h: 48 },
-  { day: 'Jum', label: '1.200.000', h: 80 },
-  { day: 'Sab', label: '1.500.000', h: 100 },
-  { day: 'Min', label: '1.310.000', h: 86 },
-  { day: 'Sen', label: '1.240.000', h: 82, active: true }
-];
+const fmtRp = (n) => 'Rp' + Number(n || 0).toLocaleString('id-ID');
+
+function formatTodayIndo() {
+  return new Date().toLocaleDateString('id-ID', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+  });
+}
+
+function formatShortToday() {
+  return new Date().toLocaleDateString('id-ID', {
+    weekday: 'long', day: 'numeric', month: 'short', year: 'numeric'
+  });
+}
+
+function formatWeekRange() {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(end.getDate() - 6);
+  const s = start.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+  const e = end.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+  return `${s}–${e}`;
+}
+
+function getGreetingIndo() {
+  const h = new Date().getHours();
+  if (h < 11) return 'Selamat pagi';
+  if (h < 15) return 'Selamat siang';
+  if (h < 18) return 'Selamat sore';
+  return 'Selamat malam';
+}
+
+function getLast7DaysChart() {
+  const amounts = [
+    { label: '900.000', h: 55 },
+    { label: '1.100.000', h: 72 },
+    { label: '800.000', h: 48 },
+    { label: '1.200.000', h: 80 },
+    { label: '1.500.000', h: 100 },
+    { label: '1.310.000', h: 86 },
+    { label: '1.240.000', h: 82 }
+  ];
+  return amounts.map((item, idx) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - idx));
+    const dayName = d.toLocaleDateString('id-ID', { weekday: 'short' });
+    return { ...item, day: dayName, active: idx === 6 };
+  });
+}
+
+if (document.getElementById('sidebarDate')) {
+  document.getElementById('sidebarDate').textContent = formatTodayIndo();
+}
 
 async function loadOrders() {
   try {
@@ -32,6 +76,8 @@ async function loadOrders() {
 }
 
 async function switchPage(page) {
+  closeQRModal();
+
   document.querySelectorAll('.menu-btn').forEach(btn => {
     const active = btn.dataset.menu === page;
     btn.className = active
@@ -40,7 +86,7 @@ async function switchPage(page) {
   });
 
   try {
-    const res = await fetch(`pages/${page}.html`);
+    const res = await fetch(`/owner/pages/${page}.html`);
     const html = await res.text();
     document.getElementById('main-content').innerHTML = html;
     refreshCurrentViewData();
@@ -52,7 +98,7 @@ async function switchPage(page) {
 
 function refreshCurrentViewData() {
   if (document.getElementById('kpiGrid')) renderDasbor();
-  if (document.getElementById('newWeight')) calcNewOrder();
+  if (document.getElementById('newWeight')) syncPesananBaruUI();
   if (document.getElementById('kanbanBoard')) renderKanban();
   if (document.getElementById('verifyDetailContainer')) findVerifyOrder();
   if (document.getElementById('rekapKPI')) renderRekap();
@@ -61,6 +107,7 @@ function refreshCurrentViewData() {
 function renderBars(elId) {
   const el = document.getElementById(elId);
   if (!el) return;
+  const chartData = getLast7DaysChart();
   el.innerHTML = chartData.map(d => `
     <div class="flex flex-col items-center gap-1.5 h-full justify-end">
       <span class="text-[11px] font-bold text-ink">${d.label}</span>
@@ -71,6 +118,15 @@ function renderBars(elId) {
 }
 
 function renderDasbor() {
+  const greetEl = document.getElementById('dasborGreeting');
+  if (greetEl) greetEl.textContent = `${getGreetingIndo()}, Bu ${owner.name.split(' ')[0]}`;
+
+  const subDateEl = document.getElementById('dasborSubDate');
+  if (subDateEl) subDateEl.textContent = `Ringkasan operasional laundry Anda · ${formatTodayIndo()}.`;
+
+  const weekEl = document.getElementById('weekRangeLabel');
+  if (weekEl) weekEl.textContent = formatWeekRange();
+
   const diproses = orders.filter(o => o.status === 'Dicuci' || o.status === 'Disetrika').length;
   const siap = orders.filter(o => o.status === 'Siap Diambil').length;
   const ekspres = orders.filter(o => o.package === 'Ekspres' && o.status !== 'Selesai').length;
@@ -120,17 +176,42 @@ function renderDasbor() {
   }
 }
 
+function styleRadioPair(activeBtnId, inactiveBtnId, activeDotId, inactiveDotId) {
+  const activeBtn = document.getElementById(activeBtnId);
+  const inactiveBtn = document.getElementById(inactiveBtnId);
+  const activeDot = document.getElementById(activeDotId);
+  const inactiveDot = document.getElementById(inactiveDotId);
+  if (!activeBtn || !inactiveBtn || !activeDot || !inactiveDot) return;
+
+  activeBtn.className = 'p-4 rounded-2xl bg-aqua border border-aqua text-left transition cursor-pointer';
+  inactiveBtn.className = 'p-4 rounded-2xl bg-white border border-borderline text-left transition cursor-pointer';
+  activeDot.className = 'w-4 h-4 rounded-full border-[5px] border-ink bg-white inline-block shrink-0 transition-all';
+  inactiveDot.className = 'w-4 h-4 rounded-full border-2 border-ink bg-transparent inline-block shrink-0 transition-all';
+}
+
+function syncPesananBaruUI() {
+  const hdr = document.getElementById('sumOrderHeader');
+  if (hdr) hdr.textContent = `#SK-BARU · ${formatShortToday()}`;
+  selectPkg(selectedPkg);
+  selectPayment(selectedPayment);
+}
+
 function selectPkg(pkg) {
   selectedPkg = pkg;
-  const bReg = document.getElementById('pkgReguler');
-  const bEks = document.getElementById('pkgEkspres');
-  if (!bReg || !bEks) return;
   if (pkg === 'Reguler') {
-    bReg.className = 'p-4 rounded-2xl bg-aqua border border-aqua text-left transition cursor-pointer';
-    bEks.className = 'p-4 rounded-2xl border border-borderline text-left transition cursor-pointer';
+    styleRadioPair('pkgReguler', 'pkgEkspres', 'dotReguler', 'dotEkspres');
   } else {
-    bEks.className = 'p-4 rounded-2xl bg-aqua border border-aqua text-left transition cursor-pointer';
-    bReg.className = 'p-4 rounded-2xl border border-borderline text-left transition cursor-pointer';
+    styleRadioPair('pkgEkspres', 'pkgReguler', 'dotEkspres', 'dotReguler');
+  }
+  calcNewOrder();
+}
+
+function selectPayment(method) {
+  selectedPayment = method;
+  if (method === 'QRIS') {
+    styleRadioPair('payQRIS', 'payTunai', 'dotQRIS', 'dotTunai');
+  } else {
+    styleRadioPair('payTunai', 'payQRIS', 'dotTunai', 'dotQRIS');
   }
   calcNewOrder();
 }
@@ -145,15 +226,30 @@ function calcNewOrder() {
 
   const phoneWarn = document.getElementById('phoneWarn');
   if (phoneWarn) {
-    phoneWarn.textContent = phoneClean.length >= 10 ? '✓ Nomor WhatsApp valid.' : '! Nomor WhatsApp minimal 10 digit.';
+    phoneWarn.textContent = phoneClean.length >= 10
+      ? '✓ Nomor WhatsApp valid.'
+      : '! Nomor WhatsApp minimal 10 digit.';
   }
   if (document.getElementById('sumService')) document.getElementById('sumService').textContent = document.getElementById('newService').value;
   if (document.getElementById('sumWeight')) document.getElementById('sumWeight').textContent = `${w.toFixed(1).replace('.', ',')} kg`;
   if (document.getElementById('sumPkg')) document.getElementById('sumPkg').textContent = `Paket ${selectedPkg}`;
   if (document.getElementById('sumRate')) document.getElementById('sumRate').textContent = `${fmtRp(rate)}/kg`;
+  if (document.getElementById('sumPay')) document.getElementById('sumPay').textContent = selectedPayment;
   if (document.getElementById('sumSub')) document.getElementById('sumSub').textContent = fmtRp(total);
   if (document.getElementById('sumTotal')) document.getElementById('sumTotal').textContent = fmtRp(total);
-  if (document.getElementById('sumEst')) document.getElementById('sumEst').textContent = selectedPkg === 'Ekspres' ? 'Hari ini · 8 jam' : '2 hari ke depan · 17.00';
+
+  const sumEst = document.getElementById('sumEst');
+  if (sumEst) {
+    if (selectedPkg === 'Ekspres') {
+      const est = new Date(Date.now() + 8 * 3600 * 1000);
+      const jam = est.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+      sumEst.textContent = `Hari ini · ${jam} WIB`;
+    } else {
+      const est = new Date(Date.now() + 48 * 3600 * 1000);
+      const tgl = est.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+      sumEst.textContent = `${tgl} · 17.00 WIB`;
+    }
+  }
 }
 
 async function submitNewOrder() {
@@ -162,6 +258,7 @@ async function submitNewOrder() {
     phone: document.getElementById('newPhone').value.trim(),
     service_type: document.getElementById('newService').value,
     package: selectedPkg,
+    payment_method: selectedPayment,
     weight: parseFloat(document.getElementById('newWeight').value) || 0,
     notes: document.getElementById('newNotes').value.trim()
   };
@@ -176,7 +273,7 @@ async function submitNewOrder() {
     return;
   }
   await loadOrders();
-  switchPage('antrean');
+  await switchPage('antrean');
   showToast();
 }
 
@@ -185,7 +282,7 @@ const nextMap = { 'Antre': 'Dicuci', 'Dicuci': 'Disetrika', 'Disetrika': 'Siap D
 function renderKanban() {
   const board = document.getElementById('kanbanBoard');
   if (!board) return;
-  const filter = document.getElementById('filterPkg').value;
+  const filter = document.getElementById('filterPkg')?.value || 'ALL';
   const cols = ['Antre', 'Dicuci', 'Disetrika', 'Siap Diambil'];
 
   board.innerHTML = cols.map(col => {
@@ -205,7 +302,7 @@ function renderKanban() {
             ${o.package === 'Ekspres' ? `<span class="inline-block px-2.5 py-0.5 rounded-full bg-aqua text-ink text-[10px] font-bold">Ekspres</span>` : ''}
             <div class="font-extrabold text-sm text-ink">${o.customer_name}</div>
             <div class="text-[11px] text-inksoft">${o.weight} kg · ${o.service_type}</div>
-            <div class="text-[11px] text-inksoft">${isReady ? `Rak ${o.rack_location} · ${o.payment_status}` : o.est_finish}</div>
+            <div class="text-[11px] text-inksoft">${isReady ? `Rak ${o.rack_location} · ${o.payment_method}` : o.est_finish}</div>
             ${isReady ? `
               <button onclick="openVerify('${o.id}')" class="w-full mt-2 py-2 rounded-xl border border-tealbrand/50 text-ink hover:bg-aqua/40 font-bold text-[11px] transition cursor-pointer">
                 Verifikasi pengambilan →
@@ -262,7 +359,7 @@ function findVerifyOrder() {
   if (!box) return;
   const q = (document.getElementById('verifyInput')?.value || '').trim().toLowerCase();
   const o = orders.find(x => x.id.toLowerCase().includes(q) || x.customer_name.toLowerCase().includes(q));
-  
+
   if (!o) {
     box.innerHTML = `<div class="bg-white rounded-3xl p-8 text-center text-sm text-inksoft">Pesanan tidak ditemukan.</div>`;
     return;
@@ -341,28 +438,76 @@ function findVerifyOrder() {
 
         <div class="bg-white rounded-3xl p-5 shadow-sm space-y-3">
           <div class="text-sm font-bold text-ink">Siap diserahkan</div>
-          <p class="text-xs text-inksoft">Pastikan pelanggan menerima seluruh cucian sebelum konfirmasi.</p>
-          <button onclick="confirmPickup('${o.id}')" ${o.status === 'Selesai' ? 'disabled' : ''}
+          <p class="text-xs text-inksoft">Buat QR pengambilan untuk dipindai kamera pelanggan agar status otomatis menjadi Selesai.</p>
+          <button onclick="openPickupQR('${o.id}')" ${o.status === 'Selesai' ? 'disabled' : ''}
             class="w-full py-3 rounded-xl bg-tealbrand hover:bg-tealdark disabled:bg-mutedbox disabled:text-inksoft text-white font-bold text-xs transition cursor-pointer">
-            ${o.status === 'Selesai' ? 'Sudah Diserahkan' : 'Konfirmasi Pengambilan'}
+            ${o.status === 'Selesai' ? 'Sudah Diserahkan (Selesai)' : 'Konfirmasi Pengambilan (Generate QR)'}
           </button>
-          <div class="text-[11px] text-inksoft">Status akan berubah menjadi Selesai.</div>
+          <div class="text-[11px] text-inksoft">Status akan berubah menjadi Selesai setelah QR dipindai pelanggan.</div>
         </div>
       </div>
     </div>
   `;
 }
 
-async function confirmPickup(id) {
-  const res = await fetch('/api/orders/status', {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, status: 'Selesai', payment_status: 'Lunas' })
-  });
-  if (res.ok) {
-    await loadOrders();
-    alert(`Pesanan ${id} berhasil diserahkan dan berstatus Selesai.`);
+async function openPickupQR(id) {
+  try {
+    const res = await fetch('/api/orders/pickup-qr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Gagal membuat QR pengambilan');
+
+    document.getElementById('qrOrderId').textContent = data.id;
+    document.getElementById('qrTokenText').textContent = data.token;
+    document.getElementById('qrWaitStatus').innerHTML = `
+      <span class="w-2 h-2 rounded-full bg-tealbrand animate-ping"></span>
+      Menunggu pelanggan memindai QR...
+    `;
+
+    const box = document.getElementById('qrCanvasBox');
+    box.innerHTML = '';
+    new QRCode(box, {
+      text: data.qr_payload,
+      width: 210,
+      height: 210,
+      colorDark: '#163338',
+      colorLight: '#FFFFFF',
+      correctLevel: QRCode.CorrectLevel.M
+    });
+
+    document.getElementById('qrModal').classList.remove('hidden');
+    lucide.createIcons();
+
+    clearInterval(qrPollTimer);
+    qrPollTimer = setInterval(async () => {
+      try {
+        const pollRes = await fetch('/api/orders');
+        const latest = await pollRes.json();
+        const found = latest.find(x => x.id === id);
+        if (found && found.status === 'Selesai') {
+          clearInterval(qrPollTimer);
+          orders = latest;
+          document.getElementById('qrWaitStatus').innerHTML = `✓ Pengambilan terverifikasi! Status kini Selesai.`;
+          setTimeout(() => {
+            closeQRModal();
+            findVerifyOrder();
+          }, 1500);
+        }
+      } catch (_) {}
+    }, 2500);
+  } catch (err) {
+    alert(err.message);
   }
+}
+
+function closeQRModal() {
+  clearInterval(qrPollTimer);
+  qrPollTimer = null;
+  const modal = document.getElementById('qrModal');
+  if (modal) modal.classList.add('hidden');
 }
 
 function renderRekap() {
@@ -390,7 +535,9 @@ function renderRekap() {
     </div>
   `;
   renderBars('rekapChart');
-  if (document.getElementById('txCountLabel')) document.getElementById('txCountLabel').textContent = `${orders.length} transaksi pada periode ini`;
+  if (document.getElementById('txCountLabel')) {
+    document.getElementById('txCountLabel').textContent = `${orders.length} transaksi · ${formatTodayIndo()}`;
+  }
   const rekapTable = document.getElementById('rekapTable');
   if (rekapTable) {
     rekapTable.innerHTML = orders.map(o => `

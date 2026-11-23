@@ -110,9 +110,20 @@
       updateRoleHint(idInput.value);
     }
 
+    const submitBtn = document.querySelector('#loginForm button[type="submit"]');
+
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       errorMsg.classList.add('hidden');
+
+      if (!window.SukiAPI) {
+        errorMsg.textContent = 'File /shared/api.js gagal dimuat. Cek lokasi folder shared/.';
+        errorMsg.classList.remove('hidden');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Memproses...';
       try {
         const data = await SukiAPI.login(idInput.value, pwInput.value);
         localStorage.setItem('suki_user', JSON.stringify(data.user));
@@ -120,6 +131,9 @@
       } catch (err) {
         errorMsg.textContent = err.message;
         errorMsg.classList.remove('hidden');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Masuk Sekarang';
       }
     });
   </script>
